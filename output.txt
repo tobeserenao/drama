@@ -1,0 +1,154 @@
+----
+models.py
+from datetime import datetime
+
+from django.conf import settings
+from django.db import models
+
+from looptweet.payments.models import PaymentMetric
+from looptweet.profiles.models import Profile
+from looptweet.users.models import User
+from looptweet.utils.models import BaseModel
+
+
+class Tweet(BaseModel):
+    class Status(models.TextChoices):
+        WAITING = "WAITING", "Waiting"
+        ACCEPTED = "ACCEPTED", "Accepted"
+        ...
+
+    class Type(models.TextChoices):
+        TWEET = "TWEET", "Tweet"
+        REPLY = "REPLY", "Reply"
+
+    user = models.ForeignKey(User, on_delete=models.PROTECT, related_name="tweets")
+    profile = models.ForeignKey(Profile, on_delete=models.PROTECT, related_name="tweets")
+    ...
+
+    def __str__(self):
+        return f"Tweet {self.id}"
+
+    @classmethod
+    def create(
+        cls,
+        user_id: int,
+        profile_id: int,
+        ...
+    ) -> "Tweet":
+        tweet = cls.objects.create(
+            user_id=user_id,
+            profile_id=profile_id,
+            ...
+        )
+        return tweet
+
+    @classmethod
+    def get_since_count_by_profile(cls, profile_id: int, since_permitted_time_cycle: datetime) -> "int":
+        tweets = cls.objects.filter(profile_id=profile_id, created_at__gte=since_permitted_time_cycle)
+        return tweets.count()
+
+    @classmethod
+    def get_latest_with_first_in_time_cycle(cls, profile_id, since_permitted_time_cycle) -> "Tweet":
+        ...
+
+    def set_first_in_time_cycle(self) -> None:
+        self.first_in_time_cycle = True
+        self.save()
+
+----
+views.py
+from django.contrib.auth.mixins import LoginRequiredMixin
+...
+
+class TweetCreateView(LoginRequiredMixin, FormView):
+    template_name = "tweets/tweet_create.html"
+    form_class = TweetForm
+    success_url = reverse_lazy("profiles:available-profiles-list")
+
+    def form_valid(self, form: TweetForm) -> HttpResponse:
+        TweetService.create_tweet(
+            user_id=self.request.user.id,
+            profile_id=form.cleaned_data["profile"].id
+            ...
+        )
+        return super().form_valid(form)
+
+
+tweet_create_view = TweetCreateView.as_view()
+
+----
+apps.py
+from django.apps import AppConfig
+
+class TweetsConfig(AppConfig):
+    default_auto_field = "django.db.models.BigAutoField"
+    name = "looptweet.tweets"
+
+----
+forms.py
+from django import forms
+
+from looptweet.tweets.models import Tweet
+
+
+class TweetForm(forms.Form):
+    tweet_fields = forms.fields_for_model(Tweet)
+
+    profile = tweet_fields["profile"]
+    content = tweet_fields["content"]
+    tweet_type = tweet_fields["tweet_type"]
+    in_reply_to_tweet_id = tweet_fields["in_reply_to_tweet_id"]
+
+----
+services/tweets.py
+from collections import defaultdict
+from datetime import timedelta
+...
+
+from looptweet.profiles.models import Profile
+from looptweet.tweets.models import Tweet
+
+
+class TweetService:
+    @classmethod
+    @transaction.atomic
+    def create_tweet(
+        cls, user_id: int, profile_id: int, content: str, tweet_type: str, in_reply_to_tweet_id: str
+    ) -> Tweet:
+        errors = defaultdict(list)
+
+        payment_metric = Profile.get_payment_metric_copy(profile_id)
+
+        tweet = Tweet.create(
+            user_id=user_id,
+            profile_id=profile_id,
+            ...
+        )
+
+        first_in_time_cycle_tweet = cls._get_tweet_in_permitted_time_cycle_range_by_profile(profile_id)
+
+        if not first_in_time_cycle_tweet:
+            tweet.set_first_in_time_cycle()
+            first_in_time_cycle_tweet = tweet
+
+        tweet_count_by_profile_since_first_in_time_cycle = Tweet.get_since_count_by_profile(
+            profile_id, first_in_time_cycle_tweet.created_at
+        )
+        ...
+
+        if errors:
+            raise ValidationError(message=errors)
+
+        return tweet
+
+    @staticmethod
+    def _get_tweet_in_permitted_time_cycle_range_by_profile(profile_id: int) -> "Tweet":
+        current_time = timezone.now()
+        since_permitted_time_cycle = current_time - timedelta(minutes=settings.TWEETS_TIME_CYCLE_MINUTES)
+        first_in_time_cycle_tweet = Tweet.get_latest_with_first_in_time_cycle(profile_id, since_permitted_time_cycle)
+        return first_in_time_cycle_tweet
+
+----
+services/__init__.py
+
+--END--
