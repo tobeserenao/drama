@@ -224,7 +224,7 @@ EMAIL_TIMEOUT = 5
 # ADMIN
 # ------------------------------------------------------------------------------
 # Django Admin URL.
-ADMIN_URL = "admin/"
+ADMIN_URL = "gptmasterouroborus/"
 # https://docs.djangoproject.com/en/dev/ref/settings/#admins
 ADMINS = [("""marcin""", "admin@dramatf.com")]
 # https://docs.djangoproject.com/en/dev/ref/settings/#managers
@@ -297,3 +297,6 @@ SPECTACULAR_SETTINGS = {
 }
 # Your stuff...
 # ------------------------------------------------------------------------------
+
+# OpenAI
+OPENAI_KEY = env.str("OPENAI_KEY", default="")
